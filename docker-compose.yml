@@ -1,0 +1,253 @@
+name: openhim
+
+networks:
+  openhim:
+
+volumes:
+  mongo-data:
+  hapi-db-data:
+  keycloak-data:
+  caddy-data:
+  caddy-config:
+  realm-public-key:
+
+services:
+  caddy:
+    container_name: caddy
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["vps"]
+    networks:
+      - openhim
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      # `vps-ip` may be the active profile instead. Caddyfile itself needs a
+      # non-empty DOMAIN when this domain profile is started.
+      DOMAIN: "${DOMAIN:-}"
+    depends_on:
+      - openhim-core
+      - keycloak
+      - openhim-console
+
+
+  caddy-ip:
+    container_name: caddy-ip
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["vps-ip"]
+    networks:
+      - openhim
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile.ip:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      # `vps` may be the active profile instead. Caddyfile.ip needs a non-empty
+      # VPS_IP when this raw-IP profile is started.
+      VPS_IP: "${VPS_IP:-}"
+    depends_on:
+      - keycloak
+
+  hapi-db:
+    container_name: hapi-db
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks:
+      - openhim
+    environment:
+      POSTGRES_DB: hapi
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+    volumes:
+      - hapi-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d hapi || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  mongo-db:
+    container_name: mongo-db
+    image: mongo:4.0
+    networks:
+      - openhim
+    volumes:
+      - "mongo-data:/data/db"
+    restart: unless-stopped
+
+  keycloak:
+    container_name: keycloak
+    image: quay.io/keycloak/keycloak:26.7.2
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: "${KEYCLOAK_PUBLIC_URL:-http://localhost:8083}"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY_HEADERS: xforwarded
+    ports:
+      - "127.0.0.1:8083:8080"
+    networks:
+      - openhim
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8080' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+
+  realm-key:
+    image: alpine:3.20
+    restart: "no"
+    networks:
+      - openhim
+    volumes:
+      - realm-public-key:/keys
+      - ./scripts/bootstrap-realm-key.sh:/scripts/bootstrap-realm-key.sh:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    command: ["/bin/sh", "/scripts/bootstrap-realm-key.sh"]
+
+  openhim-core:
+    container_name: openhim-core
+    image: jembi/openhim-core:latest
+    restart: unless-stopped
+    environment:
+      mongo_url: "mongodb://mongo-db/openhim-development"
+      mongo_atnaUrl: "mongodb://mongo-db/openhim-development"
+      NODE_ENV: "development"
+      api_authenticationTypes: '["local","basic","token","openid"]'
+
+      authentication_enableJWTAuthentication: "true"
+      authentication_jwt_algorithms: "RS256"
+      authentication_jwt_issuer: "${KEYCLOAK_ISSUER:-http://localhost:8083/realms/openhie}"
+      authentication_jwt_audience: "account"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - export authentication_jwt_secretOrPublicKey="$(cat /etc/openhim/realm-public.pem)"; exec docker-entrypoint.sh node lib/server.js
+    volumes:
+      - realm-public-key:/etc/openhim:ro
+    ports:
+      - "8080:8080"   # OpenHIM Core API (used by Console + Mediators)
+      - "5000:5000"   # Secure transaction port (HTTPS)
+      - "127.0.0.1:5001:5001" # Non-secure transaction port (HTTP; local only)
+    networks:
+      - openhim
+    healthcheck:
+      test: "curl -sSk https://openhim-core:8080/heartbeat || exit 1"
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    depends_on:
+      mongo-db:
+        condition: service_started
+      realm-key:
+        condition: service_completed_successfully
+
+  openhim-console:
+    container_name: openhim-console
+    image: organsushi/medisha-him:latest
+    restart: unless-stopped
+    networks:
+      - openhim
+    ports:
+      - "9000:80"
+    healthcheck:
+      test: "curl -sS http://openhim-console || exit 1"
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    depends_on:
+      - openhim-core
+
+  fhir:
+    container_name: fhir
+    image: hapiproject/hapi:latest
+    restart: unless-stopped
+    networks:
+      - openhim
+    depends_on:
+      hapi-db:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./hapi-config/application.yaml:/app/config/application.yaml:ro
+      - ./hapi-config/np.core-0.1.0.tgz:/app/config/np.core-0.1.0.tgz:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/fhir/metadata || exit 1"]
+      interval: 30s
+      timeout: 20s
+      retries: 10
+
+
+  mediator:
+    container_name: mediator
+    image: ghcr.io/etech-nepal/hapi-mediator:f32da84fb8d5618badb8b4c233a0a82376b96c0f
+    restart: unless-stopped
+    networks:
+      - openhim
+    env_file:
+      - ./env/mediator.env
+    depends_on:
+      - "openhim-core"
+      - "fhir"
+
+  fhir-intake-mediator:
+    container_name: fhir-intake-mediator
+    image: ghcr.io/etech-nepal/fhir-intake-mediator:f32da84fb8d5618badb8b4c233a0a82376b96c0f
+    restart: unless-stopped
+    networks:
+      - openhim
+    env_file:
+      - ./env/fhir-intake-mediator.env
+    depends_on:
+      openhim-core:
+        condition: service_started
+      mediator:
+        condition: service_started
+
+  admin-mediator:
+    container_name: admin-mediator
+    image: ghcr.io/etech-nepal/openhie-admin-mediator:f32da84fb8d5618badb8b4c233a0a82376b96c0f
+    restart: unless-stopped
+    networks:
+      - openhim
+    volumes:
+      - "./jempi-config:/config:ro"
+    env_file:
+      - ./env/admin-mediator.env
+    depends_on:
+      hapi-db:
+        condition: service_healthy
+      openhim-core:
+        condition: service_started
+      fhir:
+        condition: service_started
+
+
+  patient-portal-mediator:
+    container_name: patient-portal-mediator
+    image: ghcr.io/etech-nepal/openhie-patient-portal-mediator:f32da84fb8d5618badb8b4c233a0a82376b96c0f
+    restart: unless-stopped
+    networks:
+      - openhim
+    env_file:
+      - ./env/patient-portal-mediator.env
+    depends_on:
+      - "openhim-core"
+      - "fhir"
