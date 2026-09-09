@@ -126,6 +126,7 @@ services:
     image: jembi/openhim-core:latest
     restart: unless-stopped
     environment:
+      TZ: Asia/Kathmandu
       mongo_url: "mongodb://mongo-db/openhim-development"
       mongo_atnaUrl: "mongodb://mongo-db/openhim-development"
       NODE_ENV: "development"
@@ -160,7 +161,7 @@ services:
 
   openhim-console:
     container_name: openhim-console
-    image: organsushi/medisha-him:latest
+    image: etechdocker/openhim-console:latest
     restart: unless-stopped
     networks:
       - openhim
