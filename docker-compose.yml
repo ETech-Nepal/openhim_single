@@ -161,7 +161,7 @@ services:
 
   openhim-console:
     container_name: openhim-console
-    image: etechdocker/openhim-console:latest
+    image: ghcr.io/etech-nepal/openhim-console:5720a55c025d0c8ef6c2c026a387ea1463bb5e97
     restart: unless-stopped
     networks:
       - openhim
