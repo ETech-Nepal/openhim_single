@@ -24,9 +24,9 @@ kc() { docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"; }
 kc config credentials --server http://localhost:8080 --realm master --user "$BOOTSTRAP_USER" --password "$BOOTSTRAP_PASSWORD" >/dev/null
 USER_ID="$(kc get users -r openhie -q username="$USERNAME" --fields id --format csv --noquotes)"
 if [[ -z "$USER_ID" ]]; then
-  kc create users -r openhie -s "username=$USERNAME" -s enabled=true >/dev/null
+  kc create users -r openhie -s "username=$USERNAME" -s enabled=true -s "email=$USERNAME@hie.local" -s emailVerified=true -s firstName=HIE -s lastName=ClientAdmin >/dev/null
 fi
-kc set-password -r openhie --username "$USERNAME" --new-password "$USER_PASSWORD" --temporary false
+kc set-password -r openhie --username "$USERNAME" --new-password "$USER_PASSWORD"
 kc add-roles -r openhie --uusername "$USERNAME" --cclientid realm-management --rolename manage-clients
 echo "Created or updated '$USERNAME' with realm-management/manage-clients in realm openhie."
 

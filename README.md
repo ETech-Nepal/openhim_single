@@ -1,6 +1,6 @@
 # OpenHIE single-stack deployment
 
-This folder runs OpenHIM, Keycloak, HAPI FHIR, MongoDB, PostgreSQL, and four published mediator images. It does not need the application source tree.
+This folder runs OpenHIM, Keycloak, HAPI FHIR, MongoDB, PostgreSQL, and four published mediator images. Every API client authenticates with a DPoP-bound Keycloak token (RFC 9449). It does not need the application source tree.
 
 ## Requirements
 
@@ -27,7 +27,7 @@ Edit every file before starting.
 
 | File                            | Required values                                                                                                                         |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| .env                            | Local defaults work on one machine. For a domain deployment, set DOMAIN, KEYCLOAK_PUBLIC_URL, and KEYCLOAK_ISSUER to public HTTPS URLs. |
+| .env                            | Local defaults work on one machine. For a domain deployment, set DOMAIN, KEYCLOAK_PUBLIC_URL, and KEYCLOAK_ISSUER to public HTTPS URLs, and PUBLIC_BASE_URL to the URL clients call OpenHIM on (https://openhim.<DOMAIN>). DPoP proofs must name that exact URL. |
 | env/mediator.env                | Set OPENHIM_PASSWORD; keep JEMPI_BASE_URL=http://202.51.71.81:50000/JeMPI.                                                              |
 | env/fhir-intake-mediator.env    | Set OPENHIM_PASSWORD.                                                                                                                   |
 | env/admin-mediator.env          | Set OPENHIM_PASSWORD; keep JEMPI_BASE_URL=http://202.51.71.81:50000/JeMPI.                                                              |
@@ -51,10 +51,9 @@ docker compose ps
 | HAPI FHIR              | http://localhost:8081/fhir |
 | Keycloak Admin Console | http://localhost:8083      |
 
-The realm-key service must finish with exit code 0. It reads the Keycloak realm public key and writes it to the realm-public-key Docker volume before OpenHIM starts.
+OpenHIM verifies client JWTs against the realm JWKS (KEYCLOAK_JWKS_URI), fetched live and cached. No key file is needed, and the URL must be reachable from inside the openhim-core container. A token that carries `cnf.jkt` is accepted only with a matching `DPoP` proof whose `htu` is `PUBLIC_BASE_URL` plus the request path; each proof is single-use.
 
 ```bash
-docker compose logs realm-key
 curl -kfsS https://localhost:8080/heartbeat
 curl -fsS http://localhost:8081/fhir/metadata
 ```
@@ -63,7 +62,7 @@ curl -fsS http://localhost:8081/fhir/metadata
 
 1. Open the OpenHIM Console.
 2. Sign in as root@openhim.org with the initial password openhim-password.
-3. Change the root password.
+3. Change the root password in the Console. Change it there, not with a plain `PUT /users` API call: the mediators log in with OpenHIM's token scheme, and only the Console updates that password hash too.
 4. Put the new password in OPENHIM_PASSWORD in all four files under env/.
 5. Recreate the mediators.
 
@@ -73,16 +72,28 @@ docker compose up -d --force-recreate mediator fhir-intake-mediator admin-mediat
 
 An Invalid env config error with an empty OPENHIM_PASSWORD means one of those files still has the placeholder value.
 
+## NP Core IG 1.0.0
+
+HAPI loads `hapi-config/np.core-1.0.0.tgz` (canonical `http://fhir.digitalhealth.gov.np/core`)
+and validates every write against the profiles a resource declares. Two settings in
+`hapi-config/application.yaml` are required, or every Nepal address is rejected:
+`installMode: STORE_AND_INSTALL` and the Lucene index on the `hapi-lucene-data`
+volume. Check after the first start (the IG loads in the background; allow a few minutes):
+
+```bash
+curl -s 'http://localhost:8081/fhir/ValueSet/$expand?url=http://fhir.digitalhealth.gov.np/core/ValueSet/nepal-province-vs' | jq .expansion.total   # 7
+```
+
 ## Keycloak realm
 
-Keycloak imports the openhie realm automatically. The realm-key service also creates the realm public-key file automatically. Do not run the old extract-realm-pubkey.sh workflow.
+Keycloak imports the openhie realm automatically. Do not run the old extract-realm-pubkey.sh workflow; OpenHIM reads signing keys from the realm JWKS endpoint.
 
 In the OpenHIM Console, confirm these channels:
 
 | Channel                 | Role                   |
 | ----------------------- | ---------------------- |
 | NP FHIR Orchestrator    | np-fhir-clients        |
-| NP FHIR Intake          | np-fhir-intake-clients |
+| NP FHIR Intake          | np-fhir-clients        |
 | NP Patient Admin Review | np-admin-clients       |
 | NP Patient Portal       | patient-portal-clients |
 
@@ -142,7 +153,7 @@ Open http://localhost:8081 and create an Organization with this body:
           }
         ]
       },
-      "system": "http://mohp.gov.np/fhir/NamingSystem/nhfr",
+      "system": "http://nhfr.digitalhealth.gov.np",
       "value": "3130400221"
     }
   ]
@@ -173,6 +184,7 @@ Log in as hie-client-admin and select realm **openhie**.
 4. Disable **Standard flow** and save.
 5. Open **Credentials**. Set the client authenticator to **Signed JWT** and signing algorithm to RS256.
 6. Open **Keys**. Disable **Use JWKS URL**, then import keys/3130400221.pub.pem.
+7. Open **Advanced** → **Advanced settings**. Turn on **OAuth 2.0 DPoP Bound Access Tokens Enabled** and save.
 
 #### 4. Add the NHFR subject mapper
 
@@ -182,7 +194,7 @@ Click **Configure a new mapper**, then choose **Hardcoded claim**.
 
 | Field               | Value       |
 | ------------------- | ----------- |
-| Name                | sub-as-nhfr |
+| Name                | sub-as-client-id |
 | Token Claim Name    | sub         |
 | Claim value         | 3130400221  |
 | Claim JSON Type     | String      |
@@ -211,17 +223,30 @@ Transfer keys/3130400221.key.pem to the hospital through a secure channel. Remov
 ./scripts/onboard-hospital.sh 3130400221 "Bharatpur Hospital"
 ```
 
-The script prompts for the hie-client-admin password. It creates the HAPI Organization, keypair, Keycloak client, mapper, and OpenHIM client. It stores the private key in keys/, which Git ignores.
+The script prompts for the hie-client-admin password. It creates the HAPI Organization, then runs `scripts/onboard-client.sh`, which creates the keypair, the DPoP-bound Keycloak client, the mapper, and the OpenHIM client (through the OpenHIM API, using OPENHIM_PASSWORD from env/mediator.env). It stores the private key in keys/, which Git ignores.
+
+## Onboard admin and portal clients
+
+Admin portal and patient portal backends use the same flow with a different OpenHIM role and no HAPI Organization:
+
+```bash
+./scripts/onboard-client.sh admin-portal "Patient Admin Portal" np-admin-clients
+./scripts/onboard-client.sh patient-portal "Patient Portal BFF" patient-portal-clients
+```
+
+A hospital token is refused on `/admin` and `/patient-portal`, and the reverse holds too.
 
 ## Troubleshooting
 
 | Symptom                                         | Check                                                                                                                                   |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| realm-key fails                                 | Run docker compose logs realm-key. It must exit 0 before OpenHIM starts.                                                                |
+| JWT 401 with a valid token                       | Confirm `KEYCLOAK_ISSUER` equals the token `iss` claim exactly, and that `docker compose exec openhim-core wget -qO- $KEYCLOAK_ISSUER/protocol/openid-connect/certs` returns keys. |
+| JWT 401 only for DPoP-bound tokens              | The proof must be fresh (single-use `jti`, `iat` within 5 minutes), signed with the client's own key, and name the exact method and URL; `PUBLIC_BASE_URL` in .env must equal the scheme, host, and port the client calls. |
 | Mediator restarts with OPENHIM_PASSWORD invalid | Update all four env/\*.env files with the current OpenHIM root password, then recreate mediators.                                       |
 | realm-management is missing in Keycloak roles   | Select realm openhie, then use **Role mapping** → **Assign role** → **Filter by clients**.                                              |
 | Hospital JWT receives 403 from OpenHIM          | Check that the OpenHIM client ID, mapper sub, and NHFR Organization identifier all use the same NHFR code; verify role np-fhir-clients. |
 | HAPI rejects a resource                         | Read the returned FHIR OperationOutcome. Request validation is enabled in hapi-config/application.yaml.                                 |
+| HAPI rejects every address (`HAPI-3004`)        | The IG is not stored or not indexed. Confirm `installMode: STORE_AND_INSTALL` and the Lucene settings, then recreate HAPI with fresh `hapi-db-data` and `hapi-lucene-data` volumes. |
 
 ## Update images
 
@@ -234,14 +259,15 @@ docker compose up -d
 
 ## Ingest smoke test
 
-Finish hospital onboarding first. Generate a signed access token from that
-hospital's private key, then post one raw CDRS encounter through OpenHIM.
+Finish hospital onboarding first. `get-hospital-token.sh` signs the client assertion with the hospital's private key and sends a DPoP proof, so Keycloak binds the token to that key. Every OpenHIM call then needs a fresh proof from `dpop-proof.sh` with the same key, method, and URL.
 
 ```bash
-export TOKEN="$(./scripts/get-hospital-token.sh 3130400221)"
+TOKEN="$(./scripts/get-hospital-token.sh 3130400221)"
+URL=https://localhost:5000/ingest
 
-curl -k -sS -X POST https://localhost:5000/ingest \
-  -H "Authorization: Bearer $TOKEN" \
+curl -k -sS -X POST "$URL" \
+  -H "Authorization: DPoP $TOKEN" \
+  -H "DPoP: $(./scripts/dpop-proof.sh keys/3130400221.key.pem POST "$URL" "$TOKEN")" \
   -H 'Content-Type: application/json' \
   -d '{
     "hospital_patient_number":"2405078",
@@ -249,6 +275,8 @@ curl -k -sS -X POST https://localhost:5000/ingest \
     "first_name":"CHANDRIKA",
     "last_name":"KANDEL",
     "sex":"Female",
+    "dob":"1990-01-15",
+    "phone_number":"9841000001",
     "department_type":"C",
     "department_id":"22",
     "department_name":"Family Medicine",
@@ -256,6 +284,8 @@ curl -k -sS -X POST https://localhost:5000/ingest \
   }'
 ```
 
-Expect HTTP 201. Send the same encounter_number again and confirm that no duplicate
-Encounter is created. In OpenHIM Console → Transactions, the request should show
-the NP FHIR Intake channel and its downstream FHIR orchestration.
+Expect HTTP 200 with a transaction-response Bundle: the Patient (with nepal-health-id and jempi-golden-uid identifiers) and the Encounter. Send the same encounter_number again and confirm the Encounter entry returns `200 OK`, not a new `201 Created`. The same person from a second hospital gets the same Health ID, and the Patient keeps both hospitals' MRNs.
+
+Send `dob` whenever the source has it. Without dob and national ID, JeMPI scores even an exact name and phone match below the 0.9 link threshold, so each visit creates a new golden record. The admin review scan then lists those pairs for merging.
+
+In OpenHIM Console → Transactions, the request shows the NP FHIR Intake channel with the JeMPI and HAPI orchestrations.

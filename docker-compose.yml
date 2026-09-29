@@ -6,10 +6,10 @@ networks:
 volumes:
   mongo-data:
   hapi-db-data:
+  hapi-lucene-data:
   keycloak-data:
   caddy-data:
   caddy-config:
-  realm-public-key:
 
 services:
   caddy:
@@ -34,7 +34,6 @@ services:
       - openhim-core
       - keycloak
       - openhim-console
-
 
   caddy-ip:
     container_name: caddy-ip
@@ -93,6 +92,7 @@ services:
       KC_HOSTNAME: "${KEYCLOAK_PUBLIC_URL:-http://localhost:8083}"
       KC_HOSTNAME_STRICT: "false"
       KC_PROXY_HEADERS: xforwarded
+      KC_FEATURES: dpop
     ports:
       - "127.0.0.1:8083:8080"
     networks:
@@ -107,23 +107,9 @@ services:
       retries: 10
       start_period: 30s
 
-
-  realm-key:
-    image: alpine:3.20
-    restart: "no"
-    networks:
-      - openhim
-    volumes:
-      - realm-public-key:/keys
-      - ./scripts/bootstrap-realm-key.sh:/scripts/bootstrap-realm-key.sh:ro
-    depends_on:
-      keycloak:
-        condition: service_healthy
-    command: ["/bin/sh", "/scripts/bootstrap-realm-key.sh"]
-
   openhim-core:
     container_name: openhim-core
-    image: jembi/openhim-core:latest
+    image: ghcr.io/etech-nepal/openhim-core:main
     restart: unless-stopped
     environment:
       TZ: Asia/Kathmandu
@@ -136,32 +122,34 @@ services:
       authentication_jwt_algorithms: "RS256"
       authentication_jwt_issuer: "${KEYCLOAK_ISSUER:-http://localhost:8083/realms/openhie}"
       authentication_jwt_audience: "account"
-    entrypoint:
-      - /bin/sh
-      - -c
-      - export authentication_jwt_secretOrPublicKey="$(cat /etc/openhim/realm-public.pem)"; exec docker-entrypoint.sh node lib/server.js
-    volumes:
-      - realm-public-key:/etc/openhim:ro
+      # Keys fetched live from the realm (and cached), so a key rotation or an external
+      # Keycloak needs no PEM file. Must be reachable from inside the container.
+      authentication_jwt_jwksUri: "${KEYCLOAK_JWKS_URI:-http://keycloak:8080/realms/openhie/protocol/openid-connect/certs}"
+      # DPoP (RFC 9449): a token carrying cnf.jkt must come with a proof whose htu is
+      # <this><path>. Must be the URL clients call. Empty turns the DPoP check off.
+      authentication_jwt_dpopPublicBaseUrl: "${PUBLIC_BASE_URL:-https://localhost:5000}"
     ports:
-      - "8080:8080"   # OpenHIM Core API (used by Console + Mediators)
-      - "5000:5000"   # Secure transaction port (HTTPS)
+      - "8080:8080" # OpenHIM Core API (used by Console + Mediators)
+      - "5000:5000" # Secure transaction port (HTTPS)
       - "127.0.0.1:5001:5001" # Non-secure transaction port (HTTP; local only)
     networks:
       - openhim
     healthcheck:
-      test: "curl -sSk https://openhim-core:8080/heartbeat || exit 1"
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('https').get('https://127.0.0.1:8080/heartbeat', {rejectUnauthorized: false}, r => { r.resume(); process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1));"
       interval: 30s
       timeout: 30s
       retries: 3
     depends_on:
       mongo-db:
         condition: service_started
-      realm-key:
-        condition: service_completed_successfully
 
   openhim-console:
     container_name: openhim-console
-    image: ghcr.io/etech-nepal/openhim-console:5720a55c025d0c8ef6c2c026a387ea1463bb5e97
+    image: ghcr.io/etech-nepal/openhim-console:main
     restart: unless-stopped
     networks:
       - openhim
@@ -188,29 +176,33 @@ services:
       - "8081:8080"
     volumes:
       - ./hapi-config/application.yaml:/app/config/application.yaml:ro
-      - ./hapi-config/np.core-0.1.0.tgz:/app/config/np.core-0.1.0.tgz:ro
+      - ./hapi-config/np.core-1.0.0.tgz:/app/config/np.core-1.0.0.tgz:ro
+      # Full-text index HAPI needs to expand NP Core's address ValueSets (see application.yaml).
+      - hapi-lucene-data:/home/nonroot
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/fhir/metadata || exit 1"]
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:8080/fhir/metadata || exit 1"]
       interval: 30s
       timeout: 20s
       retries: 10
 
-
   mediator:
     container_name: mediator
-    image: ghcr.io/etech-nepal/hapi-mediator:f32da84fb8d5618badb8b4c233a0a82376b96c0f
+    image: ghcr.io/etech-nepal/hapi-mediator:8d4cba4075f724ec5e045dbee04159fae9c723f1
     restart: unless-stopped
     networks:
       - openhim
     env_file:
       - ./env/mediator.env
     depends_on:
-      - "openhim-core"
-      - "fhir"
+      openhim-core:
+        condition: service_healthy
+      fhir:
+        condition: service_started
 
   fhir-intake-mediator:
     container_name: fhir-intake-mediator
-    image: ghcr.io/etech-nepal/fhir-intake-mediator:f32da84fb8d5618badb8b4c233a0a82376b96c0f
+    image: ghcr.io/etech-nepal/fhir-intake-mediator:8d4cba4075f724ec5e045dbee04159fae9c723f1
     restart: unless-stopped
     networks:
       - openhim
@@ -218,13 +210,13 @@ services:
       - ./env/fhir-intake-mediator.env
     depends_on:
       openhim-core:
-        condition: service_started
+        condition: service_healthy
       mediator:
         condition: service_started
 
   admin-mediator:
     container_name: admin-mediator
-    image: ghcr.io/etech-nepal/openhie-admin-mediator:f32da84fb8d5618badb8b4c233a0a82376b96c0f
+    image: ghcr.io/etech-nepal/openhie-admin-mediator:8d4cba4075f724ec5e045dbee04159fae9c723f1
     restart: unless-stopped
     networks:
       - openhim
@@ -236,19 +228,20 @@ services:
       hapi-db:
         condition: service_healthy
       openhim-core:
-        condition: service_started
+        condition: service_healthy
       fhir:
         condition: service_started
 
-
   patient-portal-mediator:
     container_name: patient-portal-mediator
-    image: ghcr.io/etech-nepal/openhie-patient-portal-mediator:f32da84fb8d5618badb8b4c233a0a82376b96c0f
+    image: ghcr.io/etech-nepal/openhie-patient-portal-mediator:8d4cba4075f724ec5e045dbee04159fae9c723f1
     restart: unless-stopped
     networks:
       - openhim
     env_file:
       - ./env/patient-portal-mediator.env
     depends_on:
-      - "openhim-core"
-      - "fhir"
+      openhim-core:
+        condition: service_healthy
+      fhir:
+        condition: service_started

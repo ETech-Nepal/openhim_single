@@ -3,10 +3,10 @@ set -euo pipefail
 
 CLIENT_ID="${1:-}"
 if [[ "$CLIENT_ID" == "--help" || "$CLIENT_ID" == "-h" ]]; then
-  echo "usage: $0 <nhfr-code>"
+  echo "usage: $0 <client-id>"
   exit 0
 fi
-[[ "$CLIENT_ID" =~ ^[0-9]+$ ]] || { echo "usage: $0 <nhfr-code>" >&2; exit 1; }
+[[ "$CLIENT_ID" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "usage: $0 <client-id>" >&2; exit 1; }
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PRIVATE_KEY="$ROOT/keys/$CLIENT_ID.key.pem"
@@ -25,7 +25,10 @@ payload="$(printf '{"iss":"%s","sub":"%s","aud":"%s","jti":"%s","iat":%s,"exp":%
   "$CLIENT_ID" "$CLIENT_ID" "$TOKEN_ENDPOINT" "$(openssl rand -hex 16)" "$now" "$((now + 60))" | b64url)"
 assertion="$header.$payload.$(printf '%s' "$header.$payload" | openssl dgst -sha256 -sign "$PRIVATE_KEY" | b64url)"
 
+# Keycloak binds the token to this key (cnf.jkt). Each OpenHIM call then needs
+# its own proof: scripts/dpop-proof.sh <key> <METHOD> <URL> <token>
 response="$(curl -kfsS -X POST "$TOKEN_ENDPOINT" \
+  -H "DPoP: $("$ROOT/scripts/dpop-proof.sh" "$PRIVATE_KEY" POST "$TOKEN_ENDPOINT")" \
   --data-urlencode grant_type=client_credentials \
   --data-urlencode "client_id=$CLIENT_ID" \
   --data-urlencode client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer \
