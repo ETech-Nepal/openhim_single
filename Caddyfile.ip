@@ -5,5 +5,7 @@
 # network or VPN. For a real deployment, use Caddyfile with a DNS domain and
 # HTTPS instead.
 http://{$VPS_IP} {
+	@admin path /admin /admin/* /realms/master /realms/master/*
+	respond @admin 404
 	reverse_proxy keycloak:8080
 }

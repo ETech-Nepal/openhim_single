@@ -1,0 +1,10 @@
+[
+  {
+    "id": "cdrs-v1",
+    "config": "apps/cdrs.v1.json"
+  },
+  {
+    "id": "fhir-bundle-v1",
+    "config": "apps/fhir-bundle.v1.json"
+  }
+]

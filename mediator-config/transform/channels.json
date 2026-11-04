@@ -1,0 +1,14 @@
+{
+  "validator": {
+    "urlEnv": "VALIDATOR_URL",
+    "timeoutMs": 15000
+  },
+  "identity": {
+    "urlEnv": "IDENTITY_PATIENT_URL",
+    "timeoutMs": 20000
+  },
+  "hapi": {
+    "urlEnv": "HAPI_FHIR_URL",
+    "timeoutMs": 30000
+  }
+}

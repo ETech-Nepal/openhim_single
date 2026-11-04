@@ -3,11 +3,15 @@
 # it through). DNS A records for keycloak / openhim / api / console subdomains
 # must point at this host before first start, or ACME fails.
 
+# The admin console and the master realm stay off the internet. Operators use
+# an SSH tunnel to 127.0.0.1:8083.
 keycloak.{$DOMAIN} {
+	@admin path /admin /admin/* /realms/master /realms/master/*
+	respond @admin 404
 	reverse_proxy keycloak:8080
 }
 
-# Client transaction traffic: /fhir, /ingest. Caddy terminates TLS; the
+# Client transaction traffic. Caddy terminates TLS; the
 # non-secure OpenHIM port 5001 is plain HTTP inside the docker network.
 openhim.{$DOMAIN} {
 	reverse_proxy openhim-core:5001

@@ -1,29 +1,43 @@
 {
   "realm": "openhie",
   "enabled": true,
-  "sslRequired": "none",
-  "clients": [
-    {
-      "clientId": "demo-client",
-      "enabled": true,
-      "publicClient": true,
-      "standardFlowEnabled": false,
-      "directAccessGrantsEnabled": true,
-      "serviceAccountsEnabled": false
-    }
-  ],
-  "users": [
-    {
-      "username": "demo",
-      "enabled": true,
-      "email": "demo@example.com",
-      "emailVerified": true,
-      "firstName": "Demo",
-      "lastName": "User",
-      "requiredActions": [],
-      "credentials": [
-        { "type": "password", "value": "demo123", "temporary": false }
-      ]
-    }
-  ]
+  "sslRequired": "external",
+  "clientProfiles": {
+    "profiles": [
+      {
+        "name": "dpop-required",
+        "description": "Access tokens are bound to the client's key (RFC 9449).",
+        "executors": [
+          {
+            "executor": "dpop-bind-enforcer",
+            "configuration": {
+              "auto-configure": "true"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "clientPolicies": {
+    "policies": [
+      {
+        "name": "dpop-for-all-clients",
+        "description": "Every confidential client must use DPoP. Public clients (admin-cli for kcadm) are not API clients and are left out.",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "client-access-type",
+            "configuration": {
+              "type": [
+                "confidential"
+              ]
+            }
+          }
+        ],
+        "profiles": [
+          "dpop-required"
+        ]
+      }
+    ]
+  }
 }

@@ -1,0 +1,67 @@
+{
+  "hospital": {
+    "openhimRole": "hospital",
+    "scopes": [
+      "system/Patient.crus",
+      "system/Encounter.crus",
+      "system/Observation.crus",
+      "system/DocumentReference.crus",
+      "system/Condition.crus",
+      "system/Procedure.crus",
+      "system/AllergyIntolerance.crus",
+      "system/Immunization.crus",
+      "system/MedicationRequest.crus",
+      "system/ServiceRequest.crus",
+      "system/DiagnosticReport.rs",
+      "system/Specimen.rs",
+      "system/Practitioner.rs",
+      "system/Organization.rs",
+      "system/Binary.r"
+    ]
+  },
+  "laboratory": {
+    "openhimRole": "laboratory",
+    "scopes": [
+      "system/Patient.crus",
+      "system/ServiceRequest.rs",
+      "system/Specimen.crus",
+      "system/Observation.crus",
+      "system/DiagnosticReport.crus",
+      "system/Organization.rs",
+      "system/Practitioner.rs"
+    ]
+  },
+  "identity-mediator": {
+    "openhimRole": null,
+    "scopes": [
+      "system/Patient.crus",
+      "system/*.rus"
+    ]
+  },
+  "onboarding": {
+    "openhimRole": null,
+    "scopes": [
+      "system/Organization.crus",
+      "system/Practitioner.crus"
+    ]
+  },
+  "admin-portal": {
+    "openhimRole": "np-admin-clients",
+    "scopes": []
+  },
+  "patient-portal": {
+    "openhimRole": "patient-portal-clients",
+    "scopes": []
+  },
+  "patient-portal-mediator": {
+    "openhimRole": null,
+    "scopes": [
+      "system/Patient.rs",
+      "system/Encounter.rs",
+      "system/DiagnosticReport.rs",
+      "system/DocumentReference.rs",
+      "system/Observation.rs",
+      "system/Organization.r"
+    ]
+  }
+}
