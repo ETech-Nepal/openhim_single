@@ -147,7 +147,7 @@ services:
       authentication_jwt_dpopPublicBaseUrl: "${PUBLIC_BASE_URL:-https://localhost:5000}"
     ports:
       - "127.0.0.1:8080:8080" # OpenHIM Core API (Caddy, Console and mediators reach it on the Docker network)
-      - "5000:5000" # Secure transaction port (HTTPS)
+      - "127.0.0.1:${OPENHIM_HTTPS_PORT:-5000}:5000" # Secure transaction port (HTTPS); loopback only. Set 5002 when JeMPI's registry owns 5000.
       - "127.0.0.1:5001:5001" # Non-secure transaction port (HTTP; local only)
     networks:
       - openhim
@@ -208,8 +208,8 @@ services:
       - ./hapi-config/np.core-1.0.0.tgz:/app/config/np.core-1.0.0.tgz:ro
       # Full-text index HAPI needs to expand NP Core's address ValueSets (see application.yaml).
       - hapi-lucene-data:/home/nonroot
-    # No healthcheck: the image is distroless (no shell, no curl, no javac), so any
-    # in-container probe always fails. Check from the host: curl http://localhost:8081/fhir/metadata
+  # No healthcheck: the image is distroless (no shell, no curl, no javac), so any
+  # in-container probe always fails. Check from the host: curl http://localhost:8081/fhir/metadata
 
   # Every Patient write: JeMPI, the Health ID register, HAPI. Also duplicate review
   # and merge for the admin portal.
@@ -221,8 +221,9 @@ services:
       - openhim
     env_file:
       - ./env/identity-mediator.env
-    # JeMPI runs as its own stack. When it is on this same host, set
-    # JEMPI_BASE_URL=http://host.docker.internal:50000/JeMPI in env/identity-mediator.env.
+    # JeMPI runs as its own stack. When it is on this same host, start with
+    # docker-compose.jempi.yml too (joins JeMPI's `frontend` network) and set
+    # JEMPI_BASE_URL=http://jempi_api:50000/JeMPI in env/identity-mediator.env.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:

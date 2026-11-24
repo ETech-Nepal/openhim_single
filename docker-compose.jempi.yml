@@ -1,0 +1,13 @@
+# Add-on for a host that also runs JeMPI (Docker Swarm stack, overlay network `frontend`).
+# Start JeMPI first, then: docker compose -f docker-compose.yml -f docker-compose.jempi.yml up -d
+# identity-mediator reaches JeMPI at http://jempi_api:50000/JeMPI; no JeMPI port is published.
+services:
+  identity-mediator:
+    networks:
+      - openhim
+      - jempi
+
+networks:
+  jempi:
+    name: frontend
+    external: true

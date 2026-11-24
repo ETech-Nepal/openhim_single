@@ -7,10 +7,7 @@
     "requestBody": true,
     "responseBody": true,
     "priority": 2,
-    "allow": [
-      "hospital",
-      "laboratory"
-    ],
+    "allow": ["hospital", "laboratory"],
     "routes": [
       {
         "name": "HAPI FHIR",
@@ -25,10 +22,7 @@
     "properties": [],
     "txViewAcl": [],
     "txViewFullAcl": [],
-    "methods": [
-      "GET",
-      "HEAD"
-    ],
+    "methods": ["GET", "HEAD"],
     "description": "Reads and searches, straight to HAPI. The HAPI access rules check the token's scopes and refuse searches that do not name one patient.",
     "urlPattern": "^/fhir(/metadata|/[A-Z][A-Za-z]+(/[^/]+)?(/_history(/[^/]+)?)?)?/?$"
   },
@@ -40,10 +34,7 @@
     "requestBody": true,
     "responseBody": true,
     "priority": 2,
-    "allow": [
-      "hospital",
-      "laboratory"
-    ],
+    "allow": ["hospital", "laboratory"],
     "routes": [
       {
         "name": "HAPI FHIR",
@@ -58,10 +49,7 @@
     "properties": [],
     "txViewAcl": [],
     "txViewFullAcl": [],
-    "methods": [
-      "POST",
-      "PUT"
-    ],
+    "methods": ["POST", "PUT"],
     "description": "Single-resource writes, straight to HAPI. Patient writes (identity mediator) and Bundles (transform mediator) match their priority-1 channels first.",
     "urlPattern": "^/fhir/[A-Z][A-Za-z]+(/[^/]+)?$"
   }
