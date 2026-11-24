@@ -1,0 +1,7 @@
+# Add-on for the public VPS: points the OpenHIM Console at the public Core API instead of localhost:8080.
+# Create openhim-config/console-public.json first (see README / deployment notes): copy the image's
+# config/default.json and set protocol "https", host "api.<DOMAIN>", port 443.
+services:
+  openhim-console:
+    volumes:
+      - ./openhim-config/console-public.json:/usr/share/nginx/html/config/default.json:ro

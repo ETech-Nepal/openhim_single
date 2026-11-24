@@ -223,7 +223,7 @@ services:
       - ./env/identity-mediator.env
     # JeMPI runs as its own stack. When it is on this same host, start with
     # docker-compose.jempi.yml too (joins JeMPI's `frontend` network) and set
-    # JEMPI_BASE_URL=http://jempi_api:50000/JeMPI in env/identity-mediator.env.
+    # JEMPI_BASE_URL=http://jempi_haproxy:50000/JeMPI in env/identity-mediator.env.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
