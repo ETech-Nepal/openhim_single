@@ -81,9 +81,10 @@ The order matters: the identity mediator needs its Keycloak client key before it
    ./scripts/onboard-client.sh admin-portal "Patient Admin Portal" admin-portal
    ./scripts/onboard-client.sh patient-portal-mediator "Patient portal mediator" patient-portal-mediator
    ./scripts/onboard-client.sh patient-portal "Patient Portal BFF" patient-portal
+   ./scripts/onboard-client.sh prs-portal "PRS staff portal BFF" prs-portal
    ```
 
-   `onboarding` is the operators' client for writing Organizations and Practitioners to HAPI. `identity-mediator` is the only client HAPI accepts Patient writes from. `patient-portal-mediator` reads HAPI for the patient portal (read-only scopes; the only client allowed to find a Patient by phone, for the OTP login). Compose mounts both mediator keys into their containers. The `admin-portal` key goes to the admin portal BFF (`admin_portal/docker-compose.yml` mounts it from `keys/`), the `patient-portal` key to the patient portal BFF.
+   `onboarding` is the operators' client for writing Organizations and Practitioners to HAPI. `identity-mediator` is the only client HAPI accepts Patient writes from. `patient-portal-mediator` reads HAPI for the patient portal (read-only scopes; the only client allowed to find a Patient by phone, for the OTP login). Compose mounts both mediator keys into their containers. The `admin-portal` key goes to the admin portal BFF (`admin_portal/docker-compose.yml` mounts it from `keys/`), the `patient-portal` key to the patient portal BFF, the `prs-portal` key to the PRS demo backend (`patient_portal/docker-compose.prs.yml`; `/prs/*`, role prs-clients).
 
 5. Register the channels that route `/fhir` reads and single-resource writes straight to HAPI (`openhim-config/hapi-channels.json`; prompts for the OpenHIM root password; rerun after every change to that file):
 
@@ -133,6 +134,8 @@ In the OpenHIM Console, confirm these channels. Lower priority numbers are match
 | FHIR Middleware: fhir-bundle-v1 | `/fhir` POST (Bundle) | 1 | hospital, laboratory | transform mediator |
 | FHIR Middleware: cdrs-v1 | `/transform/cdrs` POST | 1 | hospital | transform mediator |
 | NP Patient Admin Review | `/admin/*` GET, POST | 1 | np-admin-clients | identity mediator |
+| NP PRS | `/prs/*` GET | default | prs-clients | patient portal mediator |
+| NP Patient Portal | `/patient-portal/*` GET | default | patient-portal-clients | patient portal mediator |
 | NP FHIR write | `/fhir/<Type>[/<id>]` POST, PUT | 2 | hospital, laboratory | apply-hapi-channels.sh |
 | NP FHIR read | `/fhir/...` GET, HEAD | 2 | hospital, laboratory | apply-hapi-channels.sh |
 

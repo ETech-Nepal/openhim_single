@@ -58,10 +58,15 @@
     "scopes": [
       "system/Patient.rs",
       "system/Encounter.rs",
+      "system/Condition.rs",
       "system/DiagnosticReport.rs",
       "system/DocumentReference.rs",
       "system/Observation.rs",
       "system/Organization.r"
     ]
+  },
+  "prs-portal": {
+    "openhimRole": "prs-clients",
+    "scopes": []
   }
 }

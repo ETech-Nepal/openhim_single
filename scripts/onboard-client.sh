@@ -10,6 +10,7 @@
 #   admin-portal                the admin portal BFF (role np-admin-clients)
 #   patient-portal              the patient portal BFF
 #   patient-portal-mediator     the patient portal mediator's own client (HAPI reads)
+#   prs-portal                  the staff PRS portal BFF (role prs-clients; /prs/* only)
 # Run scripts/apply-realm-config.sh first: it creates the scopes.
 set -euo pipefail
 
@@ -107,6 +108,6 @@ if [[ -z "$PRIVATE_KEY" ]]; then
 fi
 echo "Private key: $PRIVATE_KEY"
 case "$TYPE" in
-  identity-mediator|onboarding|admin-portal|patient-portal|patient-portal-mediator) echo "Keep it on this host for the service that uses it." ;;
+  identity-mediator|onboarding|admin-portal|patient-portal|patient-portal-mediator|prs-portal) echo "Keep it on this host for the service that uses it." ;;
   *) echo "Transfer it securely to the client, then delete your local copy." ;;
 esac
