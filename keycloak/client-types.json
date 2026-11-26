@@ -47,6 +47,12 @@
   },
   "admin-portal": {
     "openhimRole": "np-admin-clients",
+    "scopes": [
+      "system/Organization.c"
+    ]
+  },
+  "admin-portal-provisioner": {
+    "openhimRole": null,
     "scopes": []
   },
   "patient-portal": {

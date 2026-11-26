@@ -57,7 +57,7 @@ The order matters: the identity mediator needs its Keycloak client key before it
    docker compose up -d hapi-db mongo-db keycloak openhim-core openhim-console fhir
    ```
 
-2. Create the Keycloak client administrator and bring the realm to the expected configuration (DPoP policy, one client scope per SMART scope, demo client removed). Both prompt for the Keycloak bootstrap admin (`admin` / KEYCLOAK_ADMIN_PASSWORD):
+2. Create the Keycloak client administrator and bring the realm to the expected configuration (DPoP policy, one client scope per SMART scope, admin portal sign-in, demo client removed). Both prompt for the Keycloak bootstrap admin (`admin` / KEYCLOAK_ADMIN_PASSWORD):
 
    ```bash
    ./scripts/create-realm-client-admin.sh
@@ -70,8 +70,9 @@ The order matters: the identity mediator needs its Keycloak client key before it
 
    1. Open the OpenHIM Console and sign in as root@openhim.org with the initial password openhim-password.
    2. Change the root password in the Console. Change it there, not with a plain `PUT /users` API call: OpenHIM's token scheme uses a separate password hash that only the Console keeps in step. Keep the root password with the operators; nothing in env/ uses it.
-   3. Create the role the mediators log in with (register, heartbeat, create and update their own channels, nothing else): `./scripts/create-mediator-role.sh`
+   3. Create the two limited roles: `./scripts/create-mediator-role.sh`. **mediator-registration** lets the mediators register, send heartbeats and manage their channels; **client-onboarding** lets the admin portal view and manage OpenHIM clients.
    4. In the Console, go to **Users** → **+ User**: email `mediators@openhim.local`, first name Mediators, surname Service, role **mediator-registration**. Set a strong password and put it in OPENHIM_PASSWORD in env/identity-mediator.env, env/transform-mediator.env and env/patient-portal-mediator.env.
+   5. Add a second user for the admin portal: email `admin-portal@openhim.local`, role **client-onboarding**. Its password goes in OPENHIM_API_PASSWORD in admin_portal/backend/.env.
 
 4. Onboard the platform's own clients. Each run prompts for the hie-client-admin password and, where an OpenHIM client is created, the OpenHIM root password. Keys land in keys/, which Git ignores:
 
@@ -79,12 +80,21 @@ The order matters: the identity mediator needs its Keycloak client key before it
    ./scripts/onboard-client.sh onboarding "Platform onboarding" onboarding
    ./scripts/onboard-client.sh identity-mediator "Identity mediator" identity-mediator
    ./scripts/onboard-client.sh admin-portal "Patient Admin Portal" admin-portal
+   ./scripts/onboard-client.sh admin-portal-provisioner "Admin portal provisioner" admin-portal-provisioner
    ./scripts/onboard-client.sh patient-portal-mediator "Patient portal mediator" patient-portal-mediator
    ./scripts/onboard-client.sh patient-portal "Patient Portal BFF" patient-portal
    ./scripts/onboard-client.sh prs-portal "PRS staff portal BFF" prs-portal
    ```
 
-   `onboarding` is the operators' client for writing Organizations and Practitioners to HAPI. `identity-mediator` is the only client HAPI accepts Patient writes from. `patient-portal-mediator` reads HAPI for the patient portal (read-only scopes; the only client allowed to find a Patient by phone, for the OTP login). Compose mounts both mediator keys into their containers. The `admin-portal` key goes to the admin portal BFF (`admin_portal/docker-compose.yml` mounts it from `keys/`), the `patient-portal` key to the patient portal BFF, the `prs-portal` key to the PRS demo backend (`patient_portal/docker-compose.prs.yml`; `/prs/*`, role prs-clients).
+   `onboarding` is the operators' client for writing Organizations and Practitioners to HAPI. `identity-mediator` is the only client HAPI accepts Patient writes from. `patient-portal-mediator` reads HAPI for the patient portal (read-only scopes; the only client allowed to find a Patient by phone, for the OTP login). Compose mounts both mediator keys into their containers. The `admin-portal` key goes to the admin portal BFF (`admin_portal/docker-compose.yml` mounts it from `keys/`), the `patient-portal` key to the patient portal BFF, the `prs-portal` key to the PRS demo backend (`prs/docker-compose.yml`; `/prs/*`, role prs-clients). `admin-portal-provisioner` is the admin portal's client for the Keycloak Admin API; its token never passes through OpenHIM.
+
+   Then run `apply-realm-config.sh` again, with the portal's public URLs, to give the provisioner `manage-clients` and to point the sign-in client at the portal. It prints the `admin-portal-web` secret (WEB_CLIENT_SECRET in admin_portal/backend/.env):
+
+   ```bash
+   ADMIN_PORTAL_API_URL=https://admin-api.<DOMAIN> ADMIN_PORTAL_UI_URL=https://admin.<DOMAIN> ./scripts/apply-realm-config.sh
+   ```
+
+   Later runs without the two variables keep the URLs already set.
 
 5. Register the channels that route `/fhir` reads and single-resource writes straight to HAPI (`openhim-config/hapi-channels.json`; prompts for the OpenHIM root password; rerun after every change to that file):
 
@@ -134,12 +144,13 @@ In the OpenHIM Console, confirm these channels. Lower priority numbers are match
 | FHIR Middleware: fhir-bundle-v1 | `/fhir` POST (Bundle) | 1 | hospital, laboratory | transform mediator |
 | FHIR Middleware: cdrs-v1 | `/transform/cdrs` POST | 1 | hospital | transform mediator |
 | NP Patient Admin Review | `/admin/*` GET, POST | 1 | np-admin-clients | identity mediator |
+| NP Admin Organization onboarding | `/fhir/Organization` POST | 1 | np-admin-clients | apply-hapi-channels.sh |
 | NP PRS | `/prs/*` GET | default | prs-clients | patient portal mediator |
 | NP Patient Portal | `/patient-portal/*` GET | default | patient-portal-clients | patient portal mediator |
 | NP FHIR write | `/fhir/<Type>[/<id>]` POST, PUT | 2 | hospital, laboratory | apply-hapi-channels.sh |
 | NP FHIR read | `/fhir/...` GET, HEAD | 2 | hospital, laboratory | apply-hapi-channels.sh |
 
-No channel allows DELETE. Every channel forwards the client's token: the OpenHIM role only picks the route, and the token's SMART scopes (`keycloak/client-types.json`) decide what the client may read and write. Organizations and Practitioners are read-only for facilities; the onboarding client writes them to HAPI directly.
+No channel allows DELETE. Every channel forwards the client's token: the OpenHIM role only picks the route, and the token's SMART scopes (`keycloak/client-types.json`) decide what the client may read and write. Organizations and Practitioners are read-only for facilities. The admin portal creates facility Organizations through its POST-only channel; the onboarding client writes them to HAPI directly.
 
 ## Onboard a hospital or laboratory
 
@@ -149,6 +160,18 @@ Each facility needs:
 2. A Keycloak private_key_jwt client with that code as client ID, DPoP-bound tokens, a mapper that sets `sub` to the code, and the SMART scopes of its type.
 3. An OpenHIM client with the same code and role `hospital` or `laboratory`.
 
+Use the admin portal (**Onboard facility**): the facility generates its own keypair and sends only the public key.
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out key.pem   # stays at the facility
+openssl pkey -in key.pem -pubout -out key.pub.pem                           # sent to the operator
+openssl pkey -pubin -in key.pub.pem -outform DER | openssl dgst -sha256     # read out to confirm
+```
+
+The portal writes all three, never replaces a registered key or changes a role, and is safe to retry.
+
+The script below is the fallback on the server (and what the end-to-end test uses). It generates the key here instead.
+
 ```bash
 ./scripts/onboard-facility.sh 3130400221 "Bharatpur Hospital" hospital
 ./scripts/onboard-facility.sh 3130400299 "Bharatpur Laboratory" laboratory
@@ -157,6 +180,8 @@ Each facility needs:
 The script writes the Organization with the onboarding client's token, then runs `onboard-client.sh`, which creates the keypair, the Keycloak client with its mapper and scopes, and the OpenHIM client. Transfer keys/<code>.key.pem to the facility through a secure channel and delete your local copy.
 
 Rerunning it for an existing facility updates its scopes and OpenHIM role and keeps its registered key when there is no local private key. To issue a new key, delete the client in Keycloak first.
+
+An Organization belongs to the client that created it, and only that client (or the identity mediator) may change it. For a facility created in the portal, the script's Organization update is refused with 403: use `onboard-client.sh <code> "Name" <type>` instead.
 
 ### Manual onboarding
 
@@ -200,7 +225,9 @@ Use a real NHFR code in place of 3130400221.
 
 ## Admin portal
 
-The admin portal BFF uses the `admin-portal` client (onboarded in [First start](#first-start)) with role np-admin-clients. A facility token is refused on `/admin`, and the admin token is refused on `/fhir`. `onboard-client.sh` refuses the admin-portal type for any client ID other than admin-portal unless `--allow-admin-role` is passed, because that role can merge patient records. Merge and dismiss require an `X-Admin-User` header, which the BFF sets from its own login session.
+People sign in to the portal with their own Keycloak account (realm openhie), password plus OTP, through the client `admin-portal-web`. Create them in the Keycloak console (through an SSH tunnel): **Users** → **Add user** (username of letters, digits, `.`, `_`, `@`, `-`), set a password under **Credentials**, then **Role mapping** → **Assign role** → filter by clients → `admin-portal-web`: **duplicate-reviewer** (review and merge) and/or **platform-admin** (onboard facilities). The first sign-in asks them to set up the authenticator app.
+
+The admin portal BFF uses the `admin-portal` client (onboarded in [First start](#first-start)) with role np-admin-clients. A facility token is refused on `/admin`. On `/fhir` the admin token may only POST an Organization (scope `system/Organization.c`). `onboard-client.sh` refuses the admin-portal type for any client ID other than admin-portal unless `--allow-admin-role` is passed, because that role can merge patient records. Merge and dismiss require an `X-Admin-User` header, which the BFF sets from the signed-in user.
 
 ## Create a Keycloak client administrator
 

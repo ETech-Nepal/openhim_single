@@ -4,10 +4,13 @@
 # call OpenHIM) the matching OpenHIM client.
 #   onboard-client.sh <client-id> "Client Name" <type> [--allow-admin-role]
 # Types and their scopes and OpenHIM role: keycloak/client-types.json
-#   hospital, laboratory        facilities; client ID = NHFR code (use onboard-facility.sh)
+#   hospital, laboratory        facilities; client ID = NHFR code (use the admin portal,
+#                               or onboard-facility.sh)
 #   identity-mediator           the identity mediator's own client (HAPI Patient writes)
 #   onboarding                  operators' client for Organizations and Practitioners
 #   admin-portal                the admin portal BFF (role np-admin-clients)
+#   admin-portal-provisioner    the admin portal BFF's Keycloak Admin API client
+#                               (apply-realm-config.sh grants it manage-clients)
 #   patient-portal              the patient portal BFF
 #   patient-portal-mediator     the patient portal mediator's own client (HAPI reads)
 #   prs-portal                  the staff PRS portal BFF (role prs-clients; /prs/* only)
@@ -38,7 +41,7 @@ ADMIN_USER="${ADMIN_USER:-hie-client-admin}"
 read -r -s -p "Password for $ADMIN_USER: " ADMIN_PASSWORD
 echo
 if [[ -n "$ROLE" ]]; then
-  # The mediators use a limited OpenHIM user; managing clients needs root.
+  # Operators use root here; the admin portal has its own limited user (client-onboarding).
   read -r -s -p "OpenHIM root@openhim.org password: " OPENHIM_PASSWORD
   echo
 fi
@@ -75,7 +78,10 @@ fi
 
 MAPPER_ID="$(kc get "clients/$KC_ID/protocol-mappers/models" -r openhie --fields id,name --format csv --noquotes | awk -F, '$2=="sub-as-client-id"||$2=="sub-as-nhfr"{print $1}')"
 for m in $MAPPER_ID; do kc delete "clients/$KC_ID/protocol-mappers/models/$m" -r openhie; done
-kc create "clients/$KC_ID/protocol-mappers/models" -r openhie -s name=sub-as-client-id -s protocol=openid-connect -s protocolMapper=oidc-hardcoded-claim-mapper -s 'config."claim.name"=sub' -s "config.\"claim.value\"=$ID" -s 'config."jsonType.label"=String' -s 'config."access.token.claim"=true' -s 'config."id.token.claim"=false' -s 'config."userinfo.token.claim"=false' >/dev/null
+# The provisioner calls the Keycloak Admin API, which finds its service-account user by
+# `sub`, so that claim must stay Keycloak's own.
+[[ "$TYPE" == "admin-portal-provisioner" ]] \
+  || kc create "clients/$KC_ID/protocol-mappers/models" -r openhie -s name=sub-as-client-id -s protocol=openid-connect -s protocolMapper=oidc-hardcoded-claim-mapper -s 'config."claim.name"=sub' -s "config.\"claim.value\"=$ID" -s 'config."jsonType.label"=String' -s 'config."access.token.claim"=true' -s 'config."id.token.claim"=false' -s 'config."userinfo.token.claim"=false' >/dev/null
 
 # SMART scopes: exactly the type's list, as default scopes so every token carries them.
 ALL_SCOPES="$(kc get client-scopes -r openhie --fields id,name --format csv --noquotes)"
@@ -108,6 +114,6 @@ if [[ -z "$PRIVATE_KEY" ]]; then
 fi
 echo "Private key: $PRIVATE_KEY"
 case "$TYPE" in
-  identity-mediator|onboarding|admin-portal|patient-portal|patient-portal-mediator|prs-portal) echo "Keep it on this host for the service that uses it." ;;
+  identity-mediator|onboarding|admin-portal|admin-portal-provisioner|patient-portal|patient-portal-mediator|prs-portal) echo "Keep it on this host for the service that uses it." ;;
   *) echo "Transfer it securely to the client, then delete your local copy." ;;
 esac
